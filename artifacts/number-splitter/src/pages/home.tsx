@@ -75,6 +75,7 @@ export default function Home() {
   const [input, setInput] = useState("");
   const [splitSize, setSplitSize] = useState<number>(200);
   const [isDownloading, setIsDownloading] = useState(false);
+  const [downloadProgress, setDownloadProgress] = useState<{ current: number; total: number } | null>(null);
   const [lastResult, setLastResult] = useState<HistoryEntry | null>(null);
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [showHistory, setShowHistory] = useState(false);
@@ -87,7 +88,7 @@ export default function Home() {
   const validSplitSize = splitSize > 0 ? splitSize : 1;
   const fileCount = numbers.length > 0 ? Math.ceil(numbers.length / validSplitSize) : 0;
 
-  const handleSplitAndDownload = useCallback(() => {
+  const handleSplitAndDownload = useCallback(async () => {
     if (numbers.length === 0) return;
     setIsDownloading(true);
 
@@ -96,9 +97,12 @@ export default function Home() {
     const fileNames = chunks.map((_, i) => `${sessionId}_part${i + 1}.xlsx`);
 
     try {
-      chunks.forEach((chunk, index) => {
-        downloadXlsx(chunk, fileNames[index]);
-      });
+      for (let i = 0; i < chunks.length; i++) {
+        setDownloadProgress({ current: i + 1, total: chunks.length });
+        downloadXlsx(chunks[i], fileNames[i]);
+        await new Promise((resolve) => setTimeout(resolve, 300));
+      }
+      setDownloadProgress(null);
 
       const entry: HistoryEntry = {
         id: `${Date.now()}-${sessionId}`,
@@ -116,6 +120,7 @@ export default function Home() {
       setHistory(updated.slice(0, MAX_HISTORY));
     } finally {
       setIsDownloading(false);
+      setDownloadProgress(null);
     }
   }, [numbers, validSplitSize]);
 
@@ -255,11 +260,13 @@ export default function Home() {
             >
               {isDownloading ? (
                 <>
-                  <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                  <svg className="w-4 h-4 animate-spin shrink-0" fill="none" viewBox="0 0 24 24">
                     <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                     <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                   </svg>
-                  তৈরি হচ্ছে...
+                  {downloadProgress
+                    ? `ডাউনলোড হচ্ছে… ${downloadProgress.current}/${downloadProgress.total}`
+                    : "তৈরি হচ্ছে..."}
                 </>
               ) : (
                 <>
