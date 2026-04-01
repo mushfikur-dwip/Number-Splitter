@@ -1,5 +1,51 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import * as XLSX from "xlsx";
+
+const HISTORY_KEY = "ns_download_history";
+const MAX_HISTORY = 50;
+
+type HistoryEntry = {
+  id: string;
+  sessionId: string;
+  timestamp: number;
+  totalNumbers: number;
+  splitSize: number;
+  fileCount: number;
+  fileNames: string[];
+};
+
+function generateSessionId(): string {
+  const chars = "abcdefghijklmnopqrstuvwxyz0123456789";
+  let result = "";
+  for (let i = 0; i < 6; i++) {
+    result += chars[Math.floor(Math.random() * chars.length)];
+  }
+  return result;
+}
+
+function loadHistory(): HistoryEntry[] {
+  try {
+    const raw = localStorage.getItem(HISTORY_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveHistory(entries: HistoryEntry[]) {
+  try {
+    localStorage.setItem(HISTORY_KEY, JSON.stringify(entries.slice(0, MAX_HISTORY)));
+  } catch {}
+}
+
+function formatDate(ts: number): string {
+  const d = new Date(ts);
+  return d.toLocaleDateString("bn-BD", {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+  }) + " " + d.toLocaleTimeString("bn-BD", { hour: "2-digit", minute: "2-digit" });
+}
 
 function parseNumbers(raw: string): { numbers: string[]; duplicatesRemoved: number } {
   const all = raw
@@ -29,10 +75,13 @@ export default function Home() {
   const [input, setInput] = useState("");
   const [splitSize, setSplitSize] = useState<number>(200);
   const [isDownloading, setIsDownloading] = useState(false);
-  const [lastResult, setLastResult] = useState<{
-    total: number;
-    files: number;
-  } | null>(null);
+  const [lastResult, setLastResult] = useState<HistoryEntry | null>(null);
+  const [history, setHistory] = useState<HistoryEntry[]>([]);
+  const [showHistory, setShowHistory] = useState(false);
+
+  useEffect(() => {
+    setHistory(loadHistory());
+  }, []);
 
   const { numbers, duplicatesRemoved } = parseNumbers(input);
   const validSplitSize = splitSize > 0 ? splitSize : 1;
@@ -42,22 +91,42 @@ export default function Home() {
     if (numbers.length === 0) return;
     setIsDownloading(true);
 
-    setTimeout(() => {
-      try {
-        const chunks = chunkArray(numbers, validSplitSize);
-        chunks.forEach((chunk, index) => {
-          downloadXlsx(chunk, `part${index + 1}.xlsx`);
-        });
-        setLastResult({ total: numbers.length, files: chunks.length });
-      } finally {
-        setIsDownloading(false);
-      }
-    }, 50);
+    const sessionId = generateSessionId();
+    const chunks = chunkArray(numbers, validSplitSize);
+    const fileNames = chunks.map((_, i) => `${sessionId}_part${i + 1}.xlsx`);
+
+    try {
+      chunks.forEach((chunk, index) => {
+        downloadXlsx(chunk, fileNames[index]);
+      });
+
+      const entry: HistoryEntry = {
+        id: `${Date.now()}-${sessionId}`,
+        sessionId,
+        timestamp: Date.now(),
+        totalNumbers: numbers.length,
+        splitSize: validSplitSize,
+        fileCount: chunks.length,
+        fileNames,
+      };
+
+      setLastResult(entry);
+      const updated = [entry, ...loadHistory()];
+      saveHistory(updated);
+      setHistory(updated.slice(0, MAX_HISTORY));
+    } finally {
+      setIsDownloading(false);
+    }
   }, [numbers, validSplitSize]);
 
   const handleClear = () => {
     setInput("");
     setLastResult(null);
+  };
+
+  const handleClearHistory = () => {
+    localStorage.removeItem(HISTORY_KEY);
+    setHistory([]);
   };
 
   return (
@@ -72,16 +141,7 @@ export default function Home() {
               stroke="currentColor"
               strokeWidth={1.8}
             >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                d="M9 12h6m-3-3v6M4.5 19.5l15-15M3 9l4.5-4.5M17 17l2 2M7.5 4.5l.5.5M16.5 16.5l.5.5"
-              />
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                d="M4 6h4v4H4zM16 6h4v4h-4zM4 14h4v4H4zM16 14h4v4h-4z"
-              />
+              <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h8m-8 6h16" />
             </svg>
           </div>
           <h1 className="text-3xl font-bold tracking-tight text-foreground">
@@ -99,7 +159,7 @@ export default function Home() {
                 নম্বর তালিকা
               </label>
               {numbers.length > 0 && (
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap justify-end">
                   <span className="text-xs font-medium bg-primary/10 text-primary px-2.5 py-1 rounded-full">
                     {numbers.length.toLocaleString()} টি নম্বর
                   </span>
@@ -126,10 +186,7 @@ export default function Home() {
 
           <div className="rounded-xl border border-border bg-card shadow-sm">
             <div className="px-4 py-3 border-b border-border bg-muted/30">
-              <label
-                htmlFor="split-size"
-                className="text-sm font-semibold text-foreground"
-              >
+              <label htmlFor="split-size" className="text-sm font-semibold text-foreground">
                 প্রতিটি ফাইলে কতটি নম্বর?
               </label>
             </div>
@@ -149,30 +206,15 @@ export default function Home() {
               />
               {numbers.length > 0 && validSplitSize > 0 && (
                 <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                  <svg
-                    className="w-4 h-4 text-primary shrink-0"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                    strokeWidth={2}
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
-                    />
+                  <svg className="w-4 h-4 text-primary shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
                   </svg>
                   <span>
-                    <span className="font-semibold text-foreground">
-                      {fileCount}টি
-                    </span>{" "}
+                    <span className="font-semibold text-foreground">{fileCount}টি</span>{" "}
                     Excel ফাইল তৈরি হবে
-                    {fileCount > 0 && (
-                      <span className="ml-1 text-muted-foreground">
-                        ({numbers.length.toLocaleString()} ÷ {validSplitSize} ={" "}
-                        {fileCount})
-                      </span>
-                    )}
+                    <span className="ml-1 text-muted-foreground">
+                      ({numbers.length.toLocaleString()} ÷ {validSplitSize} = {fileCount})
+                    </span>
                   </span>
                 </div>
               )}
@@ -180,28 +222,27 @@ export default function Home() {
           </div>
 
           {lastResult && (
-            <div className="rounded-xl border border-green-200 bg-green-50 dark:border-green-800/50 dark:bg-green-950/30 px-4 py-3 flex items-start gap-3">
-              <svg
-                className="w-5 h-5 text-green-600 dark:text-green-400 mt-0.5 shrink-0"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-                strokeWidth={2}
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
-                />
-              </svg>
-              <div>
-                <p className="text-sm font-semibold text-green-800 dark:text-green-300">
-                  ডাউনলোড সম্পন্ন হয়েছে!
-                </p>
-                <p className="text-sm text-green-700 dark:text-green-400 mt-0.5">
-                  {lastResult.total.toLocaleString()} টি নম্বর{" "}
-                  {lastResult.files} টি Excel ফাইলে ডাউনলোড হয়েছে।
-                </p>
+            <div className="rounded-xl border border-green-200 bg-green-50 dark:border-green-800/50 dark:bg-green-950/30 px-4 py-3">
+              <div className="flex items-start gap-3 mb-2">
+                <svg className="w-5 h-5 text-green-600 dark:text-green-400 mt-0.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-semibold text-green-800 dark:text-green-300">
+                    ডাউনলোড সম্পন্ন হয়েছে!
+                  </p>
+                  <p className="text-sm text-green-700 dark:text-green-400 mt-0.5">
+                    {lastResult.totalNumbers.toLocaleString()} টি নম্বর — {lastResult.fileCount} টি ফাইল — Session:{" "}
+                    <span className="font-mono font-semibold">{lastResult.sessionId}</span>
+                  </p>
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {lastResult.fileNames.map((name) => (
+                      <span key={name} className="text-xs font-mono bg-green-100 dark:bg-green-900/40 text-green-800 dark:text-green-300 px-2 py-0.5 rounded">
+                        {name}
+                      </span>
+                    ))}
+                  </div>
+                </div>
               </div>
             </div>
           )}
@@ -214,41 +255,16 @@ export default function Home() {
             >
               {isDownloading ? (
                 <>
-                  <svg
-                    className="w-4 h-4 animate-spin"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                  >
-                    <circle
-                      className="opacity-25"
-                      cx="12"
-                      cy="12"
-                      r="10"
-                      stroke="currentColor"
-                      strokeWidth="4"
-                    />
-                    <path
-                      className="opacity-75"
-                      fill="currentColor"
-                      d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
-                    />
+                  <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                   </svg>
                   তৈরি হচ্ছে...
                 </>
               ) : (
                 <>
-                  <svg
-                    className="w-4 h-4"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                    strokeWidth={2}
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
-                    />
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                   </svg>
                   Split &amp; Download (.xlsx)
                 </>
@@ -261,6 +277,85 @@ export default function Home() {
               >
                 পরিষ্কার করুন
               </button>
+            )}
+          </div>
+
+          <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
+            <button
+              onClick={() => setShowHistory((v) => !v)}
+              className="w-full px-4 py-3 flex items-center justify-between text-left hover:bg-muted/30 transition-colors"
+            >
+              <div className="flex items-center gap-2">
+                <svg className="w-4 h-4 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                <span className="text-sm font-semibold text-foreground">ডাউনলোড হিস্টোরি</span>
+                {history.length > 0 && (
+                  <span className="text-xs font-medium bg-muted text-muted-foreground px-2 py-0.5 rounded-full">
+                    {history.length}
+                  </span>
+                )}
+              </div>
+              <svg
+                className={`w-4 h-4 text-muted-foreground transition-transform duration-200 ${showHistory ? "rotate-180" : ""}`}
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth={2}
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+              </svg>
+            </button>
+
+            {showHistory && (
+              <div className="border-t border-border">
+                {history.length === 0 ? (
+                  <div className="px-4 py-6 text-center text-sm text-muted-foreground">
+                    এখনো কোনো ডাউনলোড হিস্টোরি নেই
+                  </div>
+                ) : (
+                  <>
+                    <div className="divide-y divide-border max-h-80 overflow-y-auto">
+                      {history.map((entry) => (
+                        <div key={entry.id} className="px-4 py-3 hover:bg-muted/20 transition-colors">
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="text-xs font-mono font-semibold text-primary bg-primary/10 px-2 py-0.5 rounded">
+                                  {entry.sessionId}
+                                </span>
+                                <span className="text-xs text-muted-foreground">
+                                  {formatDate(entry.timestamp)}
+                                </span>
+                              </div>
+                              <p className="text-sm text-foreground mt-1">
+                                <span className="font-semibold">{entry.totalNumbers.toLocaleString()}</span> নম্বর →{" "}
+                                <span className="font-semibold">{entry.fileCount}</span> ফাইল
+                                <span className="text-muted-foreground ml-1">(প্রতি ফাইলে {entry.splitSize}টি)</span>
+                              </p>
+                              <div className="mt-1.5 flex flex-wrap gap-1">
+                                {entry.fileNames.map((name) => (
+                                  <span key={name} className="text-xs font-mono text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
+                                    {name}
+                                  </span>
+                                ))}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="px-4 py-2.5 border-t border-border bg-muted/10 flex justify-end">
+                      <button
+                        onClick={handleClearHistory}
+                        className="text-xs text-destructive hover:underline font-medium"
+                      >
+                        হিস্টোরি মুছুন
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
             )}
           </div>
 
@@ -280,6 +375,10 @@ export default function Home() {
               <li className="flex items-start gap-2">
                 <span className="text-primary font-bold mt-0.5">3.</span>
                 "Split &amp; Download" বাটনে ক্লিক করুন — সব ফাইল একসাথে ডাউনলোড হবে
+              </li>
+              <li className="flex items-start gap-2">
+                <span className="text-primary font-bold mt-0.5">4.</span>
+                প্রতিটি ডাউনলোড সেশনে ইউনিক নাম (যেমন <span className="font-mono">abc123_part1.xlsx</span>) — কখনো ডুপ্লিকেট হবে না
               </li>
             </ul>
           </div>
