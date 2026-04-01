@@ -1,0 +1,31 @@
+kind = "web"
+previewPath = "/"
+title = "Number Splitter"
+version = "1.0.0"
+id = "artifacts/number-splitter"
+router = "path"
+
+[[integratedSkills]]
+name = "react-vite"
+version = "1.0.0"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 24257
+
+[services.development]
+run = "pnpm --filter @workspace/number-splitter run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/number-splitter", "run", "build" ]
+publicDir = "artifacts/number-splitter/dist/public"
+serve = "static"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "24257"
+BASE_PATH = "/"
