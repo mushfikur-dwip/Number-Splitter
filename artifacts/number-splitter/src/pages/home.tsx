@@ -1,11 +1,13 @@
 import { useState, useCallback } from "react";
 import * as XLSX from "xlsx";
 
-function parseNumbers(raw: string): string[] {
-  return raw
+function parseNumbers(raw: string): { numbers: string[]; duplicatesRemoved: number } {
+  const all = raw
     .split(/[\n\r\t,;]+/)
     .map((s) => s.trim())
     .filter((s) => s.length > 0);
+  const unique = Array.from(new Set(all));
+  return { numbers: unique, duplicatesRemoved: all.length - unique.length };
 }
 
 function chunkArray<T>(arr: T[], size: number): T[][] {
@@ -32,7 +34,7 @@ export default function Home() {
     files: number;
   } | null>(null);
 
-  const numbers = parseNumbers(input);
+  const { numbers, duplicatesRemoved } = parseNumbers(input);
   const validSplitSize = splitSize > 0 ? splitSize : 1;
   const fileCount = numbers.length > 0 ? Math.ceil(numbers.length / validSplitSize) : 0;
 
@@ -97,9 +99,16 @@ export default function Home() {
                 নম্বর তালিকা
               </label>
               {numbers.length > 0 && (
-                <span className="text-xs font-medium bg-primary/10 text-primary px-2.5 py-1 rounded-full">
-                  {numbers.length.toLocaleString()} টি নম্বর
-                </span>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-medium bg-primary/10 text-primary px-2.5 py-1 rounded-full">
+                    {numbers.length.toLocaleString()} টি নম্বর
+                  </span>
+                  {duplicatesRemoved > 0 && (
+                    <span className="text-xs font-medium bg-orange-100 text-orange-700 dark:bg-orange-950/40 dark:text-orange-400 px-2.5 py-1 rounded-full">
+                      {duplicatesRemoved} ডুপ্লিকেট বাদ
+                    </span>
+                  )}
+                </div>
               )}
             </div>
             <textarea
