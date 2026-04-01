@@ -46,7 +46,7 @@ export default function Home() {
       try {
         const chunks = chunkArray(numbers, validSplitSize);
         chunks.forEach((chunk, index) => {
-          downloadXlsx(chunk, `numbers_part${index + 1}.xlsx`);
+          downloadXlsx(chunk, `part${index + 1}.xlsx`);
         });
         setLastResult({ total: numbers.length, files: chunks.length });
       } finally {
