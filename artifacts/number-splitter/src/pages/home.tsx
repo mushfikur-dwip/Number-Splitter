@@ -65,7 +65,7 @@ function chunkArray<T>(arr: T[], size: number): T[][] {
 }
 
 function downloadXlsx(numbers: string[], filename: string) {
-  const ws = XLSX.utils.aoa_to_sheet(numbers.map((n) => [n]));
+  const ws = XLSX.utils.aoa_to_sheet(numbers.map((n) => [n, n]));
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, "Numbers");
   XLSX.writeFile(wb, filename);
