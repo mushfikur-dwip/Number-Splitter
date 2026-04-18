@@ -4,6 +4,8 @@ import * as XLSX from "xlsx";
 const HISTORY_KEY = "ns_download_history";
 const MAX_HISTORY = 50;
 
+type FileFormat = "xlsx" | "csv";
+
 type HistoryEntry = {
   id: string;
   sessionId: string;
@@ -12,6 +14,7 @@ type HistoryEntry = {
   splitSize: number;
   fileCount: number;
   fileNames: string[];
+  format?: FileFormat;
 };
 
 function generateSessionId(): string {
@@ -71,9 +74,29 @@ function downloadXlsx(numbers: string[], filename: string) {
   XLSX.writeFile(wb, filename);
 }
 
+function downloadCsv(numbers: string[], filename: string) {
+  const escape = (v: string) => {
+    if (/[",\n\r]/.test(v)) {
+      return `"${v.replace(/"/g, '""')}"`;
+    }
+    return v;
+  };
+  const csv = numbers.map((n) => `${escape(n)},${escape(n)}`).join("\r\n");
+  const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
 export default function Home() {
   const [input, setInput] = useState("");
   const [splitSize, setSplitSize] = useState<number>(200);
+  const [format, setFormat] = useState<FileFormat>("xlsx");
   const [isDownloading, setIsDownloading] = useState(false);
   const [downloadProgress, setDownloadProgress] = useState<{ current: number; total: number } | null>(null);
   const [lastResult, setLastResult] = useState<HistoryEntry | null>(null);
@@ -94,12 +117,17 @@ export default function Home() {
 
     const sessionId = generateSessionId();
     const chunks = chunkArray(numbers, validSplitSize);
-    const fileNames = chunks.map((_, i) => `${sessionId}_part${i + 1}.xlsx`);
+    const ext = format;
+    const fileNames = chunks.map((_, i) => `${sessionId}_part${i + 1}.${ext}`);
 
     try {
       for (let i = 0; i < chunks.length; i++) {
         setDownloadProgress({ current: i + 1, total: chunks.length });
-        downloadXlsx(chunks[i], fileNames[i]);
+        if (format === "csv") {
+          downloadCsv(chunks[i], fileNames[i]);
+        } else {
+          downloadXlsx(chunks[i], fileNames[i]);
+        }
         await new Promise((resolve) => setTimeout(resolve, 300));
       }
       setDownloadProgress(null);
@@ -112,6 +140,7 @@ export default function Home() {
         splitSize: validSplitSize,
         fileCount: chunks.length,
         fileNames,
+        format,
       };
 
       setLastResult(entry);
@@ -191,6 +220,50 @@ export default function Home() {
 
           <div className="rounded-xl border border-border bg-card shadow-sm">
             <div className="px-4 py-3 border-b border-border bg-muted/30">
+              <label className="text-sm font-semibold text-foreground">
+                ফাইল ফরম্যাট
+              </label>
+            </div>
+            <div className="px-4 py-4 flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setFormat("xlsx");
+                  setLastResult(null);
+                }}
+                className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold border transition-all duration-150 active:scale-[0.98] ${
+                  format === "xlsx"
+                    ? "border-primary bg-primary/10 text-primary"
+                    : "border-border bg-card text-foreground hover:bg-muted"
+                }`}
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 17v-6h6v6m-9 4h12a2 2 0 002-2V7l-5-5H6a2 2 0 00-2 2v14a2 2 0 002 2z" />
+                </svg>
+                Excel (.xlsx)
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setFormat("csv");
+                  setLastResult(null);
+                }}
+                className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold border transition-all duration-150 active:scale-[0.98] ${
+                  format === "csv"
+                    ? "border-primary bg-primary/10 text-primary"
+                    : "border-border bg-card text-foreground hover:bg-muted"
+                }`}
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
+                </svg>
+                CSV (.csv)
+              </button>
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-border bg-card shadow-sm">
+            <div className="px-4 py-3 border-b border-border bg-muted/30">
               <label htmlFor="split-size" className="text-sm font-semibold text-foreground">
                 প্রতিটি ফাইলে কতটি নম্বর?
               </label>
@@ -216,7 +289,7 @@ export default function Home() {
                   </svg>
                   <span>
                     <span className="font-semibold text-foreground">{fileCount}টি</span>{" "}
-                    Excel ফাইল তৈরি হবে
+                    {format === "csv" ? "CSV" : "Excel"} ফাইল তৈরি হবে
                     <span className="ml-1 text-muted-foreground">
                       ({numbers.length.toLocaleString()} ÷ {validSplitSize} = {fileCount})
                     </span>
@@ -273,7 +346,7 @@ export default function Home() {
                   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                   </svg>
-                  Split &amp; Download (.xlsx)
+                  Split &amp; Download (.{format})
                 </>
               )}
             </button>
