@@ -3,8 +3,33 @@ import * as XLSX from "xlsx";
 
 const HISTORY_KEY = "ns_download_history";
 const MAX_HISTORY = 50;
+const EXPORT_HEADERS = [
+  "Name*",
+  "Mobile*",
+  "Country*",
+  "State*",
+  "City*",
+  "Departments*",
+  "Description",
+  "DistributeToCallerId",
+  "DistributionCode",
+  "RemindDate",
+  "RepeateType",
+];
+const DEPARTMENT_OPTIONS = ["dep001", "dep002", "dep003", "dep004", "dep005"];
+const FIXED_LOCATION = {
+  country: "Pakistan",
+  state: "Pak",
+  city: "pak",
+};
 
 type FileFormat = "xlsx" | "csv";
+type Department = (typeof DEPARTMENT_OPTIONS)[number];
+
+type ExportOptions = {
+  department: Department;
+  callerId: string;
+};
 
 type HistoryEntry = {
   id: string;
@@ -15,6 +40,8 @@ type HistoryEntry = {
   fileCount: number;
   fileNames: string[];
   format?: FileFormat;
+  department?: Department;
+  callerId?: string;
 };
 
 function generateSessionId(): string {
@@ -43,11 +70,11 @@ function saveHistory(entries: HistoryEntry[]) {
 
 function formatDate(ts: number): string {
   const d = new Date(ts);
-  return d.toLocaleDateString("bn-BD", {
+  return d.toLocaleDateString("en-US", {
     year: "numeric",
     month: "short",
     day: "numeric",
-  }) + " " + d.toLocaleTimeString("bn-BD", { hour: "2-digit", minute: "2-digit" });
+  }) + " " + d.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
 }
 
 function parseNumbers(raw: string): { numbers: string[]; duplicatesRemoved: number } {
@@ -67,21 +94,51 @@ function chunkArray<T>(arr: T[], size: number): T[][] {
   return chunks;
 }
 
-function downloadXlsx(numbers: string[], filename: string) {
-  const ws = XLSX.utils.aoa_to_sheet(numbers.map((n) => [n, n]));
+function buildExportRows(numbers: string[], options: ExportOptions): string[][] {
+  return numbers.map((number) => [
+    number,
+    number,
+    FIXED_LOCATION.country,
+    FIXED_LOCATION.state,
+    FIXED_LOCATION.city,
+    options.department,
+    "",
+    options.callerId,
+    "",
+    "",
+    "",
+  ]);
+}
+
+function downloadXlsx(numbers: string[], filename: string, options: ExportOptions) {
+  const ws = XLSX.utils.aoa_to_sheet([EXPORT_HEADERS, ...buildExportRows(numbers, options)]);
+  ws["!cols"] = [
+    { wch: 18 },
+    { wch: 18 },
+    { wch: 14 },
+    { wch: 10 },
+    { wch: 10 },
+    { wch: 16 },
+    { wch: 16 },
+    { wch: 22 },
+    { wch: 18 },
+    { wch: 14 },
+    { wch: 16 },
+  ];
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, "Numbers");
   XLSX.writeFile(wb, filename);
 }
 
-function downloadCsv(numbers: string[], filename: string) {
+function downloadCsv(numbers: string[], filename: string, options: ExportOptions) {
   const escape = (v: string) => {
     if (/[",\n\r]/.test(v)) {
       return `"${v.replace(/"/g, '""')}"`;
     }
     return v;
   };
-  const csv = numbers.map((n) => `${escape(n)},${escape(n)}`).join("\r\n");
+  const rows = [EXPORT_HEADERS, ...buildExportRows(numbers, options)];
+  const csv = rows.map((row) => row.map(escape).join(",")).join("\r\n");
   const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8;" });
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
@@ -97,6 +154,8 @@ export default function Home() {
   const [input, setInput] = useState("");
   const [splitSize, setSplitSize] = useState<number>(200);
   const [format, setFormat] = useState<FileFormat>("xlsx");
+  const [department, setDepartment] = useState<Department>("dep001");
+  const [callerId, setCallerId] = useState("");
   const [isDownloading, setIsDownloading] = useState(false);
   const [downloadProgress, setDownloadProgress] = useState<{ current: number; total: number } | null>(null);
   const [lastResult, setLastResult] = useState<HistoryEntry | null>(null);
@@ -110,6 +169,7 @@ export default function Home() {
   const { numbers, duplicatesRemoved } = parseNumbers(input);
   const validSplitSize = splitSize > 0 ? splitSize : 1;
   const fileCount = numbers.length > 0 ? Math.ceil(numbers.length / validSplitSize) : 0;
+  const trimmedCallerId = callerId.trim();
 
   const handleSplitAndDownload = useCallback(async () => {
     if (numbers.length === 0) return;
@@ -119,14 +179,15 @@ export default function Home() {
     const chunks = chunkArray(numbers, validSplitSize);
     const ext = format;
     const fileNames = chunks.map((_, i) => `${sessionId}_part${i + 1}.${ext}`);
+    const exportOptions = { department, callerId: trimmedCallerId };
 
     try {
       for (let i = 0; i < chunks.length; i++) {
         setDownloadProgress({ current: i + 1, total: chunks.length });
         if (format === "csv") {
-          downloadCsv(chunks[i], fileNames[i]);
+          downloadCsv(chunks[i], fileNames[i], exportOptions);
         } else {
-          downloadXlsx(chunks[i], fileNames[i]);
+          downloadXlsx(chunks[i], fileNames[i], exportOptions);
         }
         await new Promise((resolve) => setTimeout(resolve, 300));
       }
@@ -141,6 +202,8 @@ export default function Home() {
         fileCount: chunks.length,
         fileNames,
         format,
+        department,
+        callerId: trimmedCallerId,
       };
 
       setLastResult(entry);
@@ -151,7 +214,7 @@ export default function Home() {
       setIsDownloading(false);
       setDownloadProgress(null);
     }
-  }, [numbers, validSplitSize]);
+  }, [numbers, validSplitSize, format, department, trimmedCallerId]);
 
   const handleClear = () => {
     setInput("");
@@ -182,7 +245,7 @@ export default function Home() {
             Number Splitter
           </h1>
           <p className="mt-2 text-muted-foreground text-base">
-            নম্বরগুলো পেস্ট করুন, ভাগের সংখ্যা দিন — Excel ফাইল ডাউনলোড করুন
+            Paste phone numbers, choose the split size, and download Excel files
           </p>
         </div>
 
@@ -190,16 +253,16 @@ export default function Home() {
           <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
             <div className="px-4 py-3 border-b border-border bg-muted/30 flex items-center justify-between">
               <label className="text-sm font-semibold text-foreground">
-                নম্বর তালিকা
+                Phone Numbers
               </label>
               {numbers.length > 0 && (
                 <div className="flex items-center gap-2 flex-wrap justify-end">
                   <span className="text-xs font-medium bg-primary/10 text-primary px-2.5 py-1 rounded-full">
-                    {numbers.length.toLocaleString()} টি নম্বর
+                    {numbers.length.toLocaleString()} numbers
                   </span>
                   {duplicatesRemoved > 0 && (
                     <span className="text-xs font-medium bg-orange-100 text-orange-700 dark:bg-orange-950/40 dark:text-orange-400 px-2.5 py-1 rounded-full">
-                      {duplicatesRemoved} ডুপ্লিকেট বাদ
+                      {duplicatesRemoved} duplicates removed
                     </span>
                   )}
                 </div>
@@ -208,7 +271,7 @@ export default function Home() {
             <textarea
               className="w-full px-4 py-3 text-sm font-mono bg-card text-foreground placeholder:text-muted-foreground resize-none focus:outline-none leading-relaxed"
               rows={12}
-              placeholder={`নম্বরগুলো এখানে পেস্ট করুন (লাইন বাই লাইন বা Excel থেকে কপি করুন)\n\n01711234567\n01811234567\n01911234567\n...`}
+              placeholder={`Paste phone numbers here (one per line or copied from Excel)\n\n923001234567\n923011234567\n923021234567\n...`}
               value={input}
               onChange={(e) => {
                 setInput(e.target.value);
@@ -221,7 +284,7 @@ export default function Home() {
           <div className="rounded-xl border border-border bg-card shadow-sm">
             <div className="px-4 py-3 border-b border-border bg-muted/30">
               <label className="text-sm font-semibold text-foreground">
-                ফাইল ফরম্যাট
+                File Format
               </label>
             </div>
             <div className="px-4 py-4 flex flex-wrap gap-2">
@@ -264,8 +327,57 @@ export default function Home() {
 
           <div className="rounded-xl border border-border bg-card shadow-sm">
             <div className="px-4 py-3 border-b border-border bg-muted/30">
+              <label className="text-sm font-semibold text-foreground">
+                Excel Sheet Settings
+              </label>
+            </div>
+            <div className="px-4 py-4 grid gap-4 sm:grid-cols-2">
+              <div className="space-y-2">
+                <label htmlFor="department" className="text-sm font-medium text-foreground">
+                  Departments*
+                </label>
+                <select
+                  id="department"
+                  value={department}
+                  onChange={(e) => {
+                    setDepartment(e.target.value as Department);
+                    setLastResult(null);
+                  }}
+                  className="w-full px-3 py-2 text-sm rounded-lg border border-input bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                >
+                  {DEPARTMENT_OPTIONS.map((option) => (
+                    <option key={option} value={option}>
+                      {option}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="space-y-2">
+                <label htmlFor="caller-id" className="text-sm font-medium text-foreground">
+                  DistributeToCallerId
+                </label>
+                <input
+                  id="caller-id"
+                  type="text"
+                  value={callerId}
+                  onChange={(e) => {
+                    setCallerId(e.target.value);
+                    setLastResult(null);
+                  }}
+                  placeholder="Example: lhuser1459"
+                  className="w-full px-3 py-2 text-sm rounded-lg border border-input bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring font-mono"
+                />
+              </div>
+              <div className="sm:col-span-2 text-xs text-muted-foreground">
+                Country: {FIXED_LOCATION.country}, State: {FIXED_LOCATION.state}, City: {FIXED_LOCATION.city}
+              </div>
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-border bg-card shadow-sm">
+            <div className="px-4 py-3 border-b border-border bg-muted/30">
               <label htmlFor="split-size" className="text-sm font-semibold text-foreground">
-                প্রতিটি ফাইলে কতটি নম্বর?
+                Numbers per file
               </label>
             </div>
             <div className="px-4 py-4 flex items-center gap-4">
@@ -288,8 +400,8 @@ export default function Home() {
                     <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
                   </svg>
                   <span>
-                    <span className="font-semibold text-foreground">{fileCount}টি</span>{" "}
-                    {format === "csv" ? "CSV" : "Excel"} ফাইল তৈরি হবে
+                    <span className="font-semibold text-foreground">{fileCount}</span>{" "}
+                    {format === "csv" ? "CSV" : "Excel"} files will be created
                     <span className="ml-1 text-muted-foreground">
                       ({numbers.length.toLocaleString()} ÷ {validSplitSize} = {fileCount})
                     </span>
@@ -307,11 +419,15 @@ export default function Home() {
                 </svg>
                 <div className="min-w-0 flex-1">
                   <p className="text-sm font-semibold text-green-800 dark:text-green-300">
-                    ডাউনলোড সম্পন্ন হয়েছে!
+                    Download complete!
                   </p>
                   <p className="text-sm text-green-700 dark:text-green-400 mt-0.5">
-                    {lastResult.totalNumbers.toLocaleString()} টি নম্বর — {lastResult.fileCount} টি ফাইল — Session:{" "}
+                    {lastResult.totalNumbers.toLocaleString()} numbers - {lastResult.fileCount} files - Session:{" "}
                     <span className="font-mono font-semibold">{lastResult.sessionId}</span>
+                  </p>
+                  <p className="text-xs text-green-700 dark:text-green-400 mt-1">
+                    Department: <span className="font-mono">{lastResult.department}</span> — Caller ID:{" "}
+                    <span className="font-mono">{lastResult.callerId}</span>
                   </p>
                   <div className="mt-2 flex flex-wrap gap-1.5">
                     {lastResult.fileNames.map((name) => (
@@ -328,7 +444,7 @@ export default function Home() {
           <div className="flex gap-3">
             <button
               onClick={handleSplitAndDownload}
-              disabled={numbers.length === 0 || isDownloading}
+              disabled={numbers.length === 0 || trimmedCallerId.length === 0 || isDownloading}
               className="flex-1 flex items-center justify-center gap-2 bg-primary text-primary-foreground px-5 py-3 rounded-xl text-sm font-semibold transition-all duration-150 hover:opacity-90 active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed shadow-sm"
             >
               {isDownloading ? (
@@ -338,8 +454,8 @@ export default function Home() {
                     <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                   </svg>
                   {downloadProgress
-                    ? `ডাউনলোড হচ্ছে… ${downloadProgress.current}/${downloadProgress.total}`
-                    : "তৈরি হচ্ছে..."}
+                    ? `Downloading... ${downloadProgress.current}/${downloadProgress.total}`
+                    : "Preparing..."}
                 </>
               ) : (
                 <>
@@ -355,7 +471,7 @@ export default function Home() {
                 onClick={handleClear}
                 className="px-4 py-3 rounded-xl text-sm font-semibold border border-border bg-card text-foreground transition-all duration-150 hover:bg-muted active:scale-[0.98]"
               >
-                পরিষ্কার করুন
+                Clear
               </button>
             )}
           </div>
@@ -369,7 +485,7 @@ export default function Home() {
                 <svg className="w-4 h-4 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
                 </svg>
-                <span className="text-sm font-semibold text-foreground">ডাউনলোড হিস্টোরি</span>
+                <span className="text-sm font-semibold text-foreground">Download History</span>
                 {history.length > 0 && (
                   <span className="text-xs font-medium bg-muted text-muted-foreground px-2 py-0.5 rounded-full">
                     {history.length}
@@ -391,7 +507,7 @@ export default function Home() {
               <div className="border-t border-border">
                 {history.length === 0 ? (
                   <div className="px-4 py-6 text-center text-sm text-muted-foreground">
-                    এখনো কোনো ডাউনলোড হিস্টোরি নেই
+                    No download history yet
                   </div>
                 ) : (
                   <>
@@ -409,10 +525,16 @@ export default function Home() {
                                 </span>
                               </div>
                               <p className="text-sm text-foreground mt-1">
-                                <span className="font-semibold">{entry.totalNumbers.toLocaleString()}</span> নম্বর →{" "}
-                                <span className="font-semibold">{entry.fileCount}</span> ফাইল
-                                <span className="text-muted-foreground ml-1">(প্রতি ফাইলে {entry.splitSize}টি)</span>
+                                <span className="font-semibold">{entry.totalNumbers.toLocaleString()}</span> numbers →{" "}
+                                <span className="font-semibold">{entry.fileCount}</span> files
+                                <span className="text-muted-foreground ml-1">({entry.splitSize} per file)</span>
                               </p>
+                              {entry.department && entry.callerId && (
+                                <p className="text-xs text-muted-foreground mt-1">
+                                  Department: <span className="font-mono">{entry.department}</span> — Caller ID:{" "}
+                                  <span className="font-mono">{entry.callerId}</span>
+                                </p>
+                              )}
                               <div className="mt-1.5 flex flex-wrap gap-1">
                                 {entry.fileNames.map((name) => (
                                   <span key={name} className="text-xs font-mono text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
@@ -430,7 +552,7 @@ export default function Home() {
                         onClick={handleClearHistory}
                         className="text-xs text-destructive hover:underline font-medium"
                       >
-                        হিস্টোরি মুছুন
+                        Clear History
                       </button>
                     </div>
                   </>
@@ -441,24 +563,28 @@ export default function Home() {
 
           <div className="rounded-xl border border-border bg-muted/20 px-4 py-4 space-y-2">
             <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-              কিভাবে ব্যবহার করবেন
+              How to use
             </p>
             <ul className="text-sm text-muted-foreground space-y-1.5 list-none">
               <li className="flex items-start gap-2">
                 <span className="text-primary font-bold mt-0.5">1.</span>
-                উপরের বক্সে নম্বরগুলো পেস্ট করুন — লাইন বাই লাইন বা Excel/CSV থেকে কপি করে দিন
+                Paste phone numbers in the box above, one per line or copied from Excel/CSV
               </li>
               <li className="flex items-start gap-2">
                 <span className="text-primary font-bold mt-0.5">2.</span>
-                প্রতি ফাইলে কতটি নম্বর রাখতে চান সেটা লিখুন (যেমন ২০০)
+                Select a Department and enter the DistributeToCallerId
               </li>
               <li className="flex items-start gap-2">
                 <span className="text-primary font-bold mt-0.5">3.</span>
-                "Split &amp; Download" বাটনে ক্লিক করুন — সব ফাইল একসাথে ডাউনলোড হবে
+                Enter how many numbers each file should contain, for example 200
               </li>
               <li className="flex items-start gap-2">
                 <span className="text-primary font-bold mt-0.5">4.</span>
-                প্রতিটি ডাউনলোড সেশনে ইউনিক নাম (যেমন <span className="font-mono">abc123_part1.xlsx</span>) — কখনো ডুপ্লিকেট হবে না
+                Click "Split &amp; Download" to download all files
+              </li>
+              <li className="flex items-start gap-2">
+                <span className="text-primary font-bold mt-0.5">5.</span>
+                Each download session gets unique file names, for example <span className="font-mono">abc123_part1.xlsx</span>
               </li>
             </ul>
           </div>
